@@ -1,18 +1,81 @@
 import json
 import boto3
+import requests
 from botocore.client import Config
 from datetime import datetime, timedelta
-from populate_excel import populate_template
+from flask import Flask, request, jsonify
+from jose import jwt, JWTError
+import logging
+import os
+from dotenv import load_dotenv
+from populate_excel import populate_template 
 
-s3_client = boto3.client('s3')
+# Load environment variables from .env file
+load_dotenv()
 
-def lambda_handler(event, context):
+# Initialize the Flask application
+app = Flask(__name__)
+
+# Cognito configuration from environment variables
+USER_POOL_ID = os.getenv('USER_POOL_ID')
+APP_CLIENT_ID = os.getenv('CLIENT_ID')
+REGION = os.getenv('AWS_REGION')
+COGNITO_ISSUER = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}"
+COGNITO_KEYS_URL = f"{COGNITO_ISSUER}/.well-known/jwks.json"
+
+# Function to get Cognito public keys
+def get_cognito_public_keys():
+    response = requests.get(COGNITO_KEYS_URL)
+    response.raise_for_status()
+    return response.json()['keys']
+
+COGNITO_PUBLIC_KEYS = get_cognito_public_keys()
+
+def get_cognito_user_id(token):
     try:
-        # Parse incoming event data
-        body = json.loads(event['body'])
-        cognito_user_id = event['requestContext']['authorizer']['claims']['sub']  # Use Cognito user ID
-        period_ending = body['periodEnding']  # YYYY-MM-DD format
+        # Decode the JWT token
+        header = jwt.get_unverified_header(token)
+        key = next((key for key in COGNITO_PUBLIC_KEYS if key['kid'] == header['kid']), None)
+        if not key:
+            logging.error("Public key not found for kid: %s", header['kid'])
+            return None
+        user_info = jwt.decode(token, key, algorithms=['RS256'], issuer=COGNITO_ISSUER, audience=APP_CLIENT_ID)
+        logging.info("Decoded user info: %s", user_info)
+        return user_info['sub']
+    except JWTError as e:
+        logging.error("JWT Error: %s", e)
+        return None
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+
+@app.route('/')
+def home():
+    return '<h1>Hello, this server is serving</h1>'
+
+@app.route('/process_expense_report', methods=['POST'])
+def process_expense_report():
+    try:
+        # Get the JWT token from the Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header is missing.")
+            return jsonify({'statusCode': 401, 'body': 'Authorization header is missing.'}), 401
         
+        token = auth_header.split(' ')[1]
+        logging.info("Received token: %s", token)
+        cognito_user_id = get_cognito_user_id(token)
+        
+        if not cognito_user_id:
+            logging.error("Invalid token.")
+            return jsonify({'statusCode': 401, 'body': 'Invalid token.'}), 401
+
+        # Parse incoming event data
+        body = request.json
+        logging.info("Received request: %s", body)
+        
+        period_ending = body['periodEnding']  # YYYY-MM-DD format
+
         # Extract other form data
         employee_department = body.get('employeeDepartment', 'Default Department')
         school = body.get('school', 'Default School')
@@ -29,16 +92,13 @@ def lambda_handler(event, context):
         bucket_name = "expensereport-bucket"
         prefix = f"{cognito_user_id}/"
         
+        s3_client = boto3.client('s3')
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
         if 'Contents' not in response:
-            return {
+            return jsonify({
                 'statusCode': 404,
-                'body': json.dumps('No files found for the user in the specified date range.'),
-                'headers': {
-                    'Access-Control-Allow-Origin': '*',
-                    'Content-Type': 'application/json'
-                }
-            }
+                'body': 'No files found for the user in the specified date range.'
+            }), 404
         
         files_data = []
         for obj in response['Contents']:
@@ -64,7 +124,7 @@ def lambda_handler(event, context):
             'travel_end_date': travel_end_date
         }
         
-        template_path = '/mnt/data/expense_report.xlsx'  # Use the uploaded template path
+        template_path = 'expense_report.xlsx'  # Use the uploaded template path
         output_path = '/tmp/output.xlsx'
         output_path = populate_template(data, template_path, output_path)
 
@@ -77,59 +137,17 @@ def lambda_handler(event, context):
                                                         Params={'Bucket': bucket_name, 'Key': s3_file_name},
                                                         ExpiresIn=3600)
 
-        return {
+        return jsonify({
             'statusCode': 200,
-            'body': json.dumps(f'File successfully processed. Download link: {presigned_url}'),
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'application/json'
-            }
-        }
+            'body': f'File successfully processed. Download link: {presigned_url}'
+        }), 200
 
     except Exception as e:
-        return {
+        logging.error("Error processing expense report: %s", e)
+        return jsonify({
             'statusCode': 500,
-            'body': json.dumps(f'Internal server error: {str(e)}'),
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'application/json'
-            }
-        }
+            'body': f'Internal server error: {str(e)}'
+        }), 500
 
-
-
-#     # Extract data with fallbacks
-#     data = {
-#         'school': body.get('school', 'Default School'),
-#         'period_ending': body.get('periodEnding', '2022-01-01'),
-#         'trip_purpose': body.get('tripPurpose', 'Default Purpose'),
-#         'travel': body.get('travel', 'Default Travel'),
-#         'travel_start_date': body.get('travelStartDate', '2022-01-01'),
-#         'travel_end_date': body.get('travelEndDate', '2022-01-02'),
-#         'employee_department': body.get('employeeDepartment', 'Default Department')
-#     }
-
-#     # Populate the template and generate output path
-#     template_path = 'expense_report.xlsx'
-#     output_path = '/tmp/output.xlsx'  # Lambda has write access to the /tmp directory
-#     output_path = populate_template(data, template_path, output_path)
-
-#     # Upload the file to S3
-#     bucket_name = 'expensereport-bucket'  # Your S3 bucket name
-#     s3_file_name = 'output.xlsx'
-#     s3 = boto3.client('s3', config=Config(signature_version='s3v4'))
-#     s3.upload_file(output_path, bucket_name, s3_file_name)
-
-#     # Generate a presigned URL for the uploaded file
-#     presigned_url = s3.generate_presigned_url('get_object',
-#                                               Params={'Bucket': bucket_name, 'Key': s3_file_name},
-#                                               ExpiresIn=3600)
-
-#     return {
-#         'statusCode': 200,
-#         'body': json.dumps(f'File successfully processed. Download link: {presigned_url}'),
-#         'headers': {
-#             'Access-Control-Allow-Origin': '*',
-#             'Content-Type': 'application/json'
-#         }
-#     }
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
