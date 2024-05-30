@@ -1,2 +1,3 @@
 misc_text_docs/*
 nginx_configs/*
+.env

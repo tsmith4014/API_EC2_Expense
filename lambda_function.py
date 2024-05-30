@@ -95,6 +95,7 @@ def process_expense_report():
         s3_client = boto3.client('s3')
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
         if 'Contents' not in response:
+            logging.info("No contents found in the specified prefix.")
             return jsonify({
                 'statusCode': 404,
                 'body': 'No files found for the user in the specified date range.'
@@ -103,14 +104,35 @@ def process_expense_report():
         files_data = []
         for obj in response['Contents']:
             key = obj['Key']
+            logging.info("Processing key: %s", key)
             obj_metadata = s3_client.head_object(Bucket=bucket_name, Key=key)['Metadata']
-            file_date = datetime.strptime(obj_metadata['date'], '%Y-%m-%d').date()
-            if period_start_date.date() <= file_date <= period_ending_date.date():
-                files_data.append({
-                    'date': file_date,
-                    'price': float(obj_metadata['price']),
-                    'category': obj_metadata['category']
-                })
+            
+            # Log all metadata keys and values
+            logging.info("All metadata for key %s: %s", key, obj_metadata)
+
+            # No need to convert to lowercase, use direct access
+            if 'date' in obj_metadata:
+                logging.info("Date metadata found for key %s", key)
+                try:
+                    file_date = datetime.strptime(obj_metadata['date'], '%Y-%m-%d').date()
+                except ValueError as e:
+                    logging.error("Error parsing date for key %s: %s", key, e)
+                    continue  # Skip this file if the date is invalid
+                
+                if period_start_date.date() <= file_date <= period_ending_date.date():
+                    files_data.append({
+                        'date': file_date,
+                        'price': float(obj_metadata.get('price', 0)),  # Default to 0 if 'price' is missing
+                        'category': obj_metadata.get('category', 'Unknown')  # Default to 'Unknown' if 'category' is missing
+                    })
+                    logging.info("Added file data for key %s: %s", key, files_data[-1])
+                else:
+                    logging.info("File date %s for key %s is outside the reporting period.", file_date, key)
+            else:
+                logging.warning("Missing 'date' metadata for key %s", key)
+                logging.info("Metadata for key %s: %s", key, obj_metadata)
+
+        logging.info("Files data collected: %s", files_data)
 
         # Generate and populate the Excel report
         data = {
