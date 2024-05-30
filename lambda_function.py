@@ -1,3 +1,4 @@
+# lambda_function.py
 import json
 import boto3
 import requests
@@ -8,7 +9,7 @@ from jose import jwt, JWTError
 import logging
 import os
 from dotenv import load_dotenv
-from populate_excel import populate_template 
+from populate_excel import populate_template
 
 # Load environment variables from .env file
 load_dotenv()
@@ -146,7 +147,7 @@ def process_expense_report():
             'travel_end_date': travel_end_date
         }
         
-        template_path = 'expense_report.xlsx'  # Use the uploaded template path
+        template_path = os.path.join(os.path.dirname(__file__), 'expense_report.xlsx')  # Use the uploaded template path
         output_path = '/tmp/output.xlsx'
         output_path = populate_template(data, template_path, output_path)
 

@@ -72,22 +72,25 @@ def populate_template(data, template_path, output_path):
 
 def get_category_row(category):
     category_mapping = {
-        'Airfare': 10,
-        'Car Rental': 11,
-        'Local Transportation': 12,
-        'Tolls/Parking': 13,
-        'Car Expense': 14,
-        'Gas': 15,
-        'Hotel': 16,
-        'Telephone': 17,
-        'Business Meals': 18,
-        'Entertainment': 19,
-        'Office Supplies': 20,
-        'Postage': 21,
-        'Tips': 22,
-        'Other': 23
+        'Airfare': 11,
+        'Car Rental': 12,
+        'Local Transportation': 13,
+        'Tolls/Parking': 14,
+        'Car Expense': 15,
+        'Gas': 16,
+        'Hotel': 17,
+        'Telephone': 18,
+        'Breakfast': 19,
+        'Lunch': 20,
+        'Dinner': 21,
+        'Business Meals': 22,
+        'Entertainment': 23,
+        'Office Supplies': 24,
+        'Postage': 25,
+        'Tips': 26,
+        'Other': 27
     }
-    return category_mapping.get(category, 24)
+    return category_mapping.get(category, 28)
 
 def populate_travel_dates(sheet, travel_start_date_str, travel_end_date_str):
     """Handles the logic for populating travel dates and per diem fields."""
