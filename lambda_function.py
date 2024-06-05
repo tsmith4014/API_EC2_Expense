@@ -11,9 +11,6 @@ import os
 from dotenv import load_dotenv
 from populate_excel import populate_template
 
-# Load environment variables from .env file
-load_dotenv()
-
 # Initialize the Flask application
 app = Flask(__name__)
 
